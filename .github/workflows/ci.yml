@@ -19,11 +19,11 @@ jobs:
       
     - name: Build Docker images
       run: |
-        docker-compose build
+        docker compose build
         
     - name: Start services
       run: |
-        docker-compose up -d
+        docker compose up -d
         
     - name: Wait for services to be ready
       run: |
@@ -32,19 +32,19 @@ jobs:
         
     - name: Check if services are running
       run: |
-        docker-compose ps
+        docker compose ps
         
     - name: Run client tests
       run: |
-        docker-compose exec -T client npm test -- --watchAll=false --ci || true
+        docker compose exec -T client npm test -- --watchAll=false --ci || true
         
     - name: Check service health
       run: |
         # Kontrollime, et teenused on käivitatud
-        docker-compose ps | grep -q "Up" || exit 1
+        docker compose ps | grep -q "Up" || exit 1
         
     - name: Stop services
       if: always()
       run: |
-        docker-compose down
+        docker compose down
 
