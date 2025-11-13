@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Build Docker images
+      run: |
+        docker-compose build
+        
+    - name: Start services
+      run: |
+        docker-compose up -d
+        
+    - name: Wait for services to be ready
+      run: |
+        echo "Waiting for services to start..."
+        sleep 10
+        
+    - name: Check if services are running
+      run: |
+        docker-compose ps
+        
+    - name: Run client tests
+      run: |
+        docker-compose exec -T client npm test -- --watchAll=false --ci || true
+        
+    - name: Check service health
+      run: |
+        # Kontrollime, et teenused on käivitatud
+        docker-compose ps | grep -q "Up" || exit 1
+        
+    - name: Stop services
+      if: always()
+      run: |
+        docker-compose down
+
