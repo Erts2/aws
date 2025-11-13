@@ -27,9 +27,50 @@ jobs:
         VALIDATE_DOCKER: true
         VALIDATE_MARKDOWN: true
 
+  sonarcloud:
+    name: 📊 SonarCloud Analysis
+    needs: github-super-linter
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # SonarCloud vajab täielikku git ajalugu
+        
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install client dependencies
+      working-directory: ./client
+      run: npm ci
+      
+    - name: Install server dependencies
+      working-directory: ./server
+      run: npm ci
+      
+    - name: Install worker dependencies
+      working-directory: ./worker
+      run: npm ci
+      
+    - name: SonarCloud Scan
+      uses: SonarSource/sonarqube-scan-action@v5.0.0
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      with:
+        args: >
+          -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+          -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+          -Dsonar.sources=.
+          -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**
+          -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+          -Dsonar.ci.activated=true
+
   build-and-test:
     name: 🐳 Docker Build & Test
-    needs: github-super-linter
+    needs: sonarcloud
     runs-on: ubuntu-latest
     
     steps:
@@ -92,44 +133,4 @@ jobs:
         docker push ${{ secrets.DOCKER_ID }}/multi-nginx
         docker push ${{ secrets.DOCKER_ID }}/multi-server
         docker push ${{ secrets.DOCKER_ID }}/multi-worker
-
-  sonarcloud:
-    name: 📊 SonarCloud Analysis
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # SonarCloud vajab täielikku git ajalugu
-        
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        
-    - name: Install client dependencies
-      working-directory: ./client
-      run: npm ci
-      
-    - name: Install server dependencies
-      working-directory: ./server
-      run: npm ci
-      
-    - name: Install worker dependencies
-      working-directory: ./worker
-      run: npm ci
-      
-    - name: SonarCloud Scan
-      uses: SonarSource/sonarqube-scan-action@v5.0.0
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      with:
-        args: >
-          -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
-          -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
-          -Dsonar.sources=.
-          -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**
-          -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
