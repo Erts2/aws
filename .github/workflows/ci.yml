@@ -36,7 +36,7 @@ jobs:
         
     - name: Run client tests
       run: |
-        docker compose exec -T client npm test -- --watchAll=false --ci || true
+        docker compose exec -T client npm test -- --watchAll=false --ci
         
     - name: Check service health
       run: |
@@ -47,4 +47,27 @@ jobs:
       if: always()
       run: |
         docker compose down
+        
+    - name: Build production Docker images
+      if: success()
+      run: |
+        docker build -t ${{ secrets.DOCKER_ID }}/multi-client ./client
+        docker build -t ${{ secrets.DOCKER_ID }}/multi-nginx ./nginx
+        docker build -t ${{ secrets.DOCKER_ID }}/multi-server ./server
+        docker build -t ${{ secrets.DOCKER_ID }}/multi-worker ./worker
+        
+    - name: Login to Docker Hub
+      if: success()
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_ID }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+        
+    - name: Push images to Docker Hub
+      if: success()
+      run: |
+        docker push ${{ secrets.DOCKER_ID }}/multi-client
+        docker push ${{ secrets.DOCKER_ID }}/multi-nginx
+        docker push ${{ secrets.DOCKER_ID }}/multi-server
+        docker push ${{ secrets.DOCKER_ID }}/multi-worker
 
