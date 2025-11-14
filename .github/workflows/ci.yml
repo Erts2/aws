@@ -9,7 +9,7 @@ on:
 
 jobs:
   github-super-linter:
-    name: 🔍 GitHub Super Linter
+    name: GitHub Super Linter
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
@@ -28,7 +28,7 @@ jobs:
         VALIDATE_MARKDOWN: true
 
   sonarcloud:
-    name: 📊 SonarCloud Analysis
+    name: SonarCloud Analysis
     needs: github-super-linter
     runs-on: ubuntu-latest
     steps:
@@ -66,10 +66,9 @@ jobs:
           -Dsonar.sources=.
           -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**
           -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
-          -Dsonar.ci.activated=true
 
   build-and-test:
-    name: 🐳 Docker Build & Test
+    name: Docker Build & Test
     needs: sonarcloud
     runs-on: ubuntu-latest
     
@@ -133,4 +132,40 @@ jobs:
         docker push ${{ secrets.DOCKER_ID }}/multi-nginx
         docker push ${{ secrets.DOCKER_ID }}/multi-server
         docker push ${{ secrets.DOCKER_ID }}/multi-worker
+
+  ai-work-estimate:
+    name: AI Töömahu Hinnang
+    needs: [github-super-linter, sonarcloud, build-and-test]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        pip install requests
+        
+    - name: Fetch base branch
+      run: |
+        git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+        
+    - name: Run AI work estimate
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_BASE_REF: ${{ github.base_ref }}
+        GITHUB_HEAD_REF: ${{ github.head_ref }}
+        GITHUB_REF: ${{ github.ref }}
+        GITHUB_EVENT_PATH: ${{ github.event_path }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      run: |
+        python3 .github/scripts/estimate_work_hours.py
 
