@@ -11,12 +11,18 @@ jobs:
   github-super-linter:
     name: GitHub Super Linter
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       
     - name: Run Super Linter
+      id: super-linter
       uses: github/super-linter@v5
+      continue-on-error: true
       env:
         DEFAULT_BRANCH: main
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -26,6 +32,27 @@ jobs:
         VALIDATE_YAML: true
         VALIDATE_DOCKER: true
         VALIDATE_MARKDOWN: true
+        LOG_LEVEL: DEBUG
+        CREATE_LOG_FILE: true
+        
+    - name: Set up Python for linter results
+      if: github.event_name == 'pull_request'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies for linter results
+      if: github.event_name == 'pull_request'
+      run: pip install requests
+      
+    - name: Post Super Linter results to PR
+      if: github.event_name == 'pull_request'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        LINTER_OUTCOME: ${{ steps.super-linter.outcome }}
+      run: python3 .github/scripts/post_linter_results.py
 
   sonarcloud:
     name: SonarCloud Analysis
@@ -138,6 +165,10 @@ jobs:
     needs: [github-super-linter, sonarcloud, build-and-test]
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -157,6 +188,12 @@ jobs:
       run: |
         git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
         
+    - name: Debug info
+      run: |
+        echo "Event name: ${{ github.event_name }}"
+        echo "PR number: ${{ github.event.pull_request.number }}"
+        echo "Repository: ${{ github.repository }}"
+        
     - name: Run AI work estimate
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -165,6 +202,7 @@ jobs:
         GITHUB_HEAD_REF: ${{ github.head_ref }}
         GITHUB_REF: ${{ github.ref }}
         GITHUB_EVENT_PATH: ${{ github.event_path }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: |
         python3 .github/scripts/estimate_work_hours.py
