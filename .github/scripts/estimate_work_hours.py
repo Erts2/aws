@@ -132,32 +132,46 @@ Vastus:"""
         print(f"Error calling OpenAI API: {e}", file=sys.stderr)
         return None
 
-def post_comment_to_pr(hours):
+def post_comment_to_pr(comment_text):
     """Postitab kommentaari PR'i"""
     github_token = os.environ.get('GITHUB_TOKEN')
     repo = os.environ.get('GITHUB_REPOSITORY')
-    pr_number = os.environ.get('GITHUB_EVENT_PATH')
+    pr_number_env = os.environ.get('PR_NUMBER')
+    event_path = os.environ.get('GITHUB_EVENT_PATH')
     
     if not github_token or not repo:
         print("GITHUB_TOKEN või GITHUB_REPOSITORY pole seadistatud", file=sys.stderr)
         return False
     
-    # Loeme PR numbri event failist
-    try:
-        with open(pr_number, 'r') as f:
-            event_data = json.load(f)
-            pr_num = event_data.get('pull_request', {}).get('number')
-    except:
-        # Kui pole PR event, siis ei postita
-        print("Pole PR event", file=sys.stderr)
-        return False
+    # Proovime kõigepealt otse PR numbrit
+    pr_num = None
+    if pr_number_env:
+        try:
+            pr_num = int(pr_number_env)
+        except:
+            pass
+    
+    # Kui pole otse PR numbrit, loeme event failist
+    if not pr_num and event_path:
+        try:
+            with open(event_path, 'r') as f:
+                event_data = json.load(f)
+                pr_num = event_data.get('pull_request', {}).get('number')
+                if not pr_num:
+                    # Proovime ka issues numbrit
+                    pr_num = event_data.get('number')
+        except Exception as e:
+            print(f"Error reading event file: {e}", file=sys.stderr)
     
     if not pr_num:
+        print(f"Ei leitud PR numbrit. PR_NUMBER={pr_number_env}, EVENT_PATH={event_path}", file=sys.stderr)
         return False
     
-    comment = f"""## 🤖 AI töömahu hinnang
+    # Kui comment_text on number, siis koostame täieliku kommentaari
+    if isinstance(comment_text, (int, float)):
+        comment = f"""## 🤖 AI töömahu hinnang
 
-**AI hinnangul võis kuluda: {hours} töötundi**
+**AI hinnangul võis kuluda: {comment_text} töötundi**
 
 *Hinnang põhineb PR muudatustel ja arvestab:*
 - Nõuetega tutvumise aeg
@@ -171,13 +185,17 @@ def post_comment_to_pr(hours):
 
 *Hinnang on tehtud keskmise arendaja (3-4a kogemust) perspektiivist.*
 """
+    else:
+        # Kui on juba valmis kommentaar
+        comment = comment_text
     
     try:
         response = requests.post(
             f'https://api.github.com/repos/{repo}/issues/{pr_num}/comments',
             headers={
-                'Authorization': f'token {github_token}',
-                'Accept': 'application/vnd.github.v3+json'
+                'Authorization': f'Bearer {github_token}',
+                'Accept': 'application/vnd.github.v3+json',
+                'X-GitHub-Api-Version': '2022-11-28'
             },
             json={'body': comment},
             timeout=10
@@ -205,18 +223,44 @@ def main():
     
     print(f"Leitud {changes_info['file_count']} muudetud faili")
     
+    # Kontrollime, kas OPENAI_API_KEY on seadistatud
+    if not os.environ.get('OPENAI_API_KEY'):
+        print("⚠️ OPENAI_API_KEY pole seadistatud - jätan AI hinnangu vahele", file=sys.stderr)
+        print("Postitan kommentaari ilma AI hinnanguta...")
+        comment = """## 🤖 AI Töömahu Hinnang
+
+⚠️ **AI hinnang pole saadaval** - OPENAI_API_KEY pole seadistatud GitHub secrets'is.
+
+Palun lisa `OPENAI_API_KEY` GitHub'i Settings → Secrets and variables → Actions.
+"""
+        if post_comment_to_pr(comment):
+            print("✅ Kommenteeritud (ilma hinnanguta)")
+        sys.exit(0)
+    
     print("Hindan töömahku AI abil...")
     hours = analyze_with_ai(changes_info)
     
     if not hours:
-        print("Ei saanud AI hinnangut", file=sys.stderr)
-        sys.exit(1)
+        print("⚠️ Ei saanud AI hinnangut", file=sys.stderr)
+        # Proovime siiski kommenteerida
+        comment = """## 🤖 AI Töömahu Hinnang
+
+⚠️ **AI hinnang ebaõnnestus** - ei saanud hinnangut OpenAI API'st.
+
+Võimalikud põhjused:
+- OpenAI API viga
+- API limiit ületatud
+- Võrguprobleemid
+"""
+        if post_comment_to_pr(comment):
+            print("✅ Kommenteeritud (veateade)")
+        sys.exit(0)
     
     print(f"AI hinnang: {hours} töötundi")
     
     print("Postitan kommentaari PR'i...")
     if post_comment_to_pr(hours):
-        print("✅ Valmis!")
+        print("✅ Valmis! Kommentaar postitatud.")
         sys.exit(0)
     else:
         print("⚠️ Kommentaari postitamine ebaõnnestus", file=sys.stderr)
