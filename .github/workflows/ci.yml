@@ -11,12 +11,18 @@ jobs:
   github-super-linter:
     name: GitHub Super Linter
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       
     - name: Run Super Linter
+      id: super-linter
       uses: github/super-linter@v5
+      continue-on-error: true
       env:
         DEFAULT_BRANCH: main
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -26,6 +32,27 @@ jobs:
         VALIDATE_YAML: true
         VALIDATE_DOCKER: true
         VALIDATE_MARKDOWN: true
+        LOG_LEVEL: DEBUG
+        CREATE_LOG_FILE: true
+        
+    - name: Set up Python for linter results
+      if: github.event_name == 'pull_request'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies for linter results
+      if: github.event_name == 'pull_request'
+      run: pip install requests
+      
+    - name: Post Super Linter results to PR
+      if: github.event_name == 'pull_request'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        LINTER_OUTCOME: ${{ steps.super-linter.outcome }}
+      run: python3 .github/scripts/post_linter_results.py
 
   sonarcloud:
     name: SonarCloud Analysis
