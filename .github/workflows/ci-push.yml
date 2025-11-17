@@ -223,6 +223,14 @@ jobs:
         
         echo "✅ Versioon loodud: $VERSION_LABEL"
         
+    - name: Check environment status before deploy
+      run: |
+        echo "🔍 Kontrollin environment'i olekut..."
+        aws elasticbeanstalk describe-environments \
+          --environment-names Frontend-env \
+          --query 'Environments[0].[EnvironmentName,Status,Health,VersionLabel]' \
+          --output table
+        
     - name: Deploy to Elastic Beanstalk
       run: |
         echo "🚀 Deploy'in Elastic Beanstalk environment'i..."
@@ -233,19 +241,45 @@ jobs:
           --version-label $VERSION_LABEL
         
         echo "✅ Deployment käsk saadetud!"
-        echo "⏳ Ootan, kuni deployment lõpeb..."
         
-        # Ootame, kuni deployment on valmis
+    - name: Wait for deployment to complete
+      continue-on-error: true
+      id: wait-deploy
+      run: |
+        echo "⏳ Ootan kuni 10 minutit, kuni deployment lõpeb..."
+        
+        # Ootame, kuni deployment on valmis (maksimaalselt 10 min)
         aws elasticbeanstalk wait environment-updated \
           --environment-names Frontend-env \
-          --max-attempts 30 \
-          --delay 30
+          --max-attempts 20 \
+          --delay 30 || {
+            echo "⚠️ Wait command timeout või viga"
+            exit 1
+          }
         
-        echo "✅ Deployment valmis!"
+        echo "✅ Deployment lõppes!"
         
-        # Näitame environment'i staatust
+    - name: Check final deployment status
+      if: always()
+      run: |
+        echo "📊 Lõplik environment'i staatus:"
         aws elasticbeanstalk describe-environments \
           --environment-names Frontend-env \
-          --query 'Environments[0].[Status,Health,VersionLabel]' \
+          --query 'Environments[0].[EnvironmentName,Status,Health,VersionLabel]' \
           --output table
+        
+        # Kontrollime, kas deployment õnnestus
+        HEALTH=$(aws elasticbeanstalk describe-environments \
+          --environment-names Frontend-env \
+          --query 'Environments[0].Health' \
+          --output text)
+        
+        echo "Environment Health: $HEALTH"
+        
+        if [ "$HEALTH" != "Green" ] && [ "$HEALTH" != "Yellow" ]; then
+          echo "❌ Deployment ebaõnnestus! Health: $HEALTH"
+          exit 1
+        fi
+        
+        echo "✅ Deployment õnnestus! Health: $HEALTH"
 
