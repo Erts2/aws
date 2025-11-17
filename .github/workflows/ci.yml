@@ -220,7 +220,7 @@ jobs:
       run: zip -r deploy.zip . -x '*.git*'
       
     - name: Deploy to AWS
-      uses: einaregilsson/beanstalk-deploy@v22
+      uses: einaregilsson/beanstalk-deploy@5be1bd3742735f267bdcf493c4a0ac010c7ea2ee # v22
       with:
         aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
         aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
