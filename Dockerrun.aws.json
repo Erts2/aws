@@ -2,38 +2,105 @@
   "AWSEBDockerrunVersion": "2",
   "containerDefinitions": [
     {
+      "name": "postgres",
+      "image": "postgres:latest",
+      "essential": false,
+      "memory": 256,
+      "environment": [
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "postgres_password"
+        }
+      ]
+    },
+    {
+      "name": "redis",
+      "image": "redis:latest",
+      "essential": false,
+      "memory": 128
+    },
+    {
       "name": "client",
       "image": "erts2/multi-client",
       "hostname": "client",
       "essential": false,
-      "memory": 128
+      "memory": 256,
+      "links": ["server"],
+      "environment": [
+        {
+          "name": "WDS_SOCKET_PORT",
+          "value": "0"
+        }
+      ]
     },
     {
       "name": "server",
       "image": "erts2/multi-server",
       "hostname": "api",
       "essential": false,
-      "memory": 128
+      "memory": 256,
+      "links": ["postgres", "redis"],
+      "environment": [
+        {
+          "name": "REDIS_HOST",
+          "value": "redis"
+        },
+        {
+          "name": "REDIS_PORT",
+          "value": "6379"
+        },
+        {
+          "name": "PGUSER",
+          "value": "postgres"
+        },
+        {
+          "name": "PGHOST",
+          "value": "postgres"
+        },
+        {
+          "name": "PGDATABASE",
+          "value": "postgres"
+        },
+        {
+          "name": "PGPASSWORD",
+          "value": "postgres_password"
+        },
+        {
+          "name": "PGPORT",
+          "value": "5432"
+        }
+      ]
     },
     {
       "name": "worker",
       "image": "erts2/multi-worker",
       "hostname": "worker",
       "essential": false,
-      "memory": 128
+      "memory": 256,
+      "links": ["redis"],
+      "environment": [
+        {
+          "name": "REDIS_HOST",
+          "value": "redis"
+        },
+        {
+          "name": "REDIS_PORT",
+          "value": "6379"
+        }
+      ]
     },
     {
-        "name": "nginx",
-        "image": "erts2/multi-nginx",
-        "essential": true,
-        "portMappings": [
-          {
-            "containerPort": 80,
-            "hostPort": 80
-          }
-        ],
-        "memory": 128
-        "links": ["client", "server"]
+      "name": "nginx",
+      "image": "erts2/multi-nginx",
+      "essential": true,
+      "memory": 128,
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "hostPort": 80
+        }
+      ],
+      "links": ["client", "server"]
     }
   ]
 }

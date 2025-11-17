@@ -1,4 +1,4 @@
-name: CI - Push (Test & Deploy)
+name: CI - Merge (Test & Deploy)
 
 on:
   push:
@@ -206,13 +206,57 @@ jobs:
       run: |
         aws s3 cp deploy.zip s3://elasticbeanstalk-eu-north-1-086585122910/frontend/deploy-${{ github.sha }}.zip
         
+    - name: Check existing versions
+      run: |
+        echo "🔍 Kontrollin olemasolevaid versioone..."
+        aws elasticbeanstalk describe-application-versions \
+          --application-name multi-docker \
+          --max-items 5 \
+          --query 'ApplicationVersions[*].[VersionLabel,DateCreated,Status]' \
+          --output table
+        
+        echo ""
+        echo "🔍 Kontrollin environment'i praegust versiooni..."
+        CURRENT_VERSION=$(aws elasticbeanstalk describe-environments \
+          --environment-names Multi-docker-env \
+          --query 'Environments[0].VersionLabel' \
+          --output text 2>/dev/null || echo "None")
+        echo "Praegune versioon: $CURRENT_VERSION"
+        
+        # Kui praegune versioon on "Sample", siis proovime seda kustutada
+        if [ "$CURRENT_VERSION" = "Sample" ]; then
+          echo "⚠️ Environment kasutab 'Sample' versiooni - see võib põhjustada probleeme"
+          echo "Proovime kustutada 'Sample' versiooni..."
+          aws elasticbeanstalk delete-application-version \
+            --application-name multi-docker \
+            --version-label Sample \
+            --delete-source-bundle 2>/dev/null || echo "Ei saanud 'Sample' versiooni kustutada (võib olla seotud environment'iga)"
+        fi
+        
     - name: Create application version
       run: |
         echo "📦 Loome Elastic Beanstalk versiooni..."
-        VERSION_LABEL="${{ github.sha }}"
+        # Kasutame lühemat versiooni labelit (esimesed 12 tähemärki)
+        VERSION_LABEL="$(echo '${{ github.sha }}' | cut -c1-12)"
         S3_BUCKET="elasticbeanstalk-eu-north-1-086585122910"
         S3_KEY="frontend/deploy-${{ github.sha }}.zip"
         
+        # Kontrollime, kas versioon on juba olemas
+        EXISTING=$(aws elasticbeanstalk describe-application-versions \
+          --application-name multi-docker \
+          --version-labels $VERSION_LABEL \
+          --query 'ApplicationVersions[0].VersionLabel' \
+          --output text 2>/dev/null || echo "")
+        
+        if [ "$EXISTING" = "$VERSION_LABEL" ]; then
+          echo "⚠️ Versioon $VERSION_LABEL on juba olemas, kustutame vana..."
+          aws elasticbeanstalk delete-application-version \
+            --application-name multi-docker \
+            --version-label $VERSION_LABEL \
+            --delete-source-bundle 2>/dev/null || true
+        fi
+        
+        echo "Loome uue versiooni: $VERSION_LABEL"
         aws elasticbeanstalk create-application-version \
           --application-name multi-docker \
           --version-label $VERSION_LABEL \
@@ -247,8 +291,10 @@ jobs:
     - name: Deploy to Elastic Beanstalk
       run: |
         echo "🚀 Deploy'in Elastic Beanstalk environment'i..."
-        VERSION_LABEL="${{ github.sha }}"
+        # Kasutame sama lühemat versiooni labelit
+        VERSION_LABEL="$(echo '${{ github.sha }}' | cut -c1-12)"
         
+        echo "Deploy'in versiooni: $VERSION_LABEL"
         aws elasticbeanstalk update-environment \
           --environment-name Multi-docker-env \
           --version-label $VERSION_LABEL
