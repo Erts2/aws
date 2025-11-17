@@ -1,0 +1,174 @@
+name: CI - Merge Request (Test Only)
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  github-super-linter:
+    name: GitHub Super Linter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Run Super Linter
+      id: super-linter
+      uses: github/super-linter@v5
+      continue-on-error: true
+      env:
+        DEFAULT_BRANCH: main
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        VALIDATE_ALL_CODEBASE: false
+        VALIDATE_JAVASCRIPT_ES: true
+        VALIDATE_JSON: true
+        VALIDATE_YAML: true
+        VALIDATE_DOCKER: true
+        VALIDATE_MARKDOWN: true
+        LOG_LEVEL: DEBUG
+        CREATE_LOG_FILE: true
+        
+    - name: Set up Python for linter results
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies for linter results
+      run: pip install requests
+      
+    - name: Post Super Linter results to PR
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        LINTER_OUTCOME: ${{ steps.super-linter.outcome }}
+      run: python3 .github/scripts/post_linter_results.py
+
+  sonarcloud:
+    name: SonarCloud Analysis
+    needs: github-super-linter
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # SonarCloud vajab täielikku git ajalugu
+        
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install client dependencies
+      working-directory: ./client
+      run: npm ci
+      
+    - name: Install server dependencies
+      working-directory: ./server
+      run: npm ci
+      
+    - name: Install worker dependencies
+      working-directory: ./worker
+      run: npm ci
+      
+    - name: SonarCloud Scan
+      uses: SonarSource/sonarqube-scan-action@v5.0.0
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      with:
+        args: >
+          -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+          -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+          -Dsonar.sources=.
+          -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**
+          -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+
+  build-and-test:
+    name: Docker Build & Test
+    needs: sonarcloud
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Build Docker images
+      run: |
+        docker compose build
+        
+    - name: Start services
+      run: |
+        docker compose up -d
+        
+    - name: Wait for services to be ready
+      run: |
+        echo "Waiting for services to start..."
+        sleep 10
+        
+    - name: Check if services are running
+      run: |
+        docker compose ps
+        
+    - name: Run client tests
+      run: |
+        docker compose exec -T client npm test -- --watchAll=false --ci
+        
+    - name: Check service health
+      run: |
+        # Kontrollime, et teenused on käivitatud
+        docker compose ps | grep -q "Up" || exit 1
+        
+    - name: Stop services
+      if: always()
+      run: |
+        docker compose down
+
+  ai-work-estimate:
+    name: AI Töömahu Hinnang
+    needs: [github-super-linter, sonarcloud, build-and-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        pip install requests
+        
+    - name: Fetch base branch
+      run: |
+        git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+        
+    - name: Run AI work estimate
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_BASE_REF: ${{ github.base_ref }}
+        GITHUB_HEAD_REF: ${{ github.head_ref }}
+        GITHUB_REF: ${{ github.ref }}
+        GITHUB_EVENT_PATH: ${{ github.event_path }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      run: |
+        python3 .github/scripts/estimate_work_hours.py
+
