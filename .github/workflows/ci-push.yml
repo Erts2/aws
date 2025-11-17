@@ -1,4 +1,4 @@
-name: CI - Merge (Test & Deploy)
+name: CI - Push (Test & Deploy)
 
 on:
   push:
@@ -204,7 +204,7 @@ jobs:
         
     - name: Upload to S3
       run: |
-        aws s3 cp deploy.zip s3://elasticbeanstalk-eu-north-1-086585122910/frontend/deploy-${{ github.sha }}.zip
+        aws s3 cp deploy.zip s3://elasticbeanstalk-eu-north-1-086585122910/multi-docker/deploy-${{ github.sha }}.zip
         
     - name: Check existing versions
       run: |
@@ -239,7 +239,7 @@ jobs:
         # Kasutame lühemat versiooni labelit (esimesed 12 tähemärki)
         VERSION_LABEL="$(echo '${{ github.sha }}' | cut -c1-12)"
         S3_BUCKET="elasticbeanstalk-eu-north-1-086585122910"
-        S3_KEY="frontend/deploy-${{ github.sha }}.zip"
+        S3_KEY="multi-docker/deploy-${{ github.sha }}.zip"
         
         # Kontrollime, kas versioon on juba olemas
         EXISTING=$(aws elasticbeanstalk describe-application-versions \
