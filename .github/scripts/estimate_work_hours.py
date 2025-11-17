@@ -205,18 +205,44 @@ def main():
     
     print(f"Leitud {changes_info['file_count']} muudetud faili")
     
+    # Kontrollime, kas OPENAI_API_KEY on seadistatud
+    if not os.environ.get('OPENAI_API_KEY'):
+        print("⚠️ OPENAI_API_KEY pole seadistatud - jätan AI hinnangu vahele", file=sys.stderr)
+        print("Postitan kommentaari ilma AI hinnanguta...")
+        comment = """## 🤖 AI Töömahu Hinnang
+
+⚠️ **AI hinnang pole saadaval** - OPENAI_API_KEY pole seadistatud GitHub secrets'is.
+
+Palun lisa `OPENAI_API_KEY` GitHub'i Settings → Secrets and variables → Actions.
+"""
+        if post_comment_to_pr(comment):
+            print("✅ Kommenteeritud (ilma hinnanguta)")
+        sys.exit(0)
+    
     print("Hindan töömahku AI abil...")
     hours = analyze_with_ai(changes_info)
     
     if not hours:
-        print("Ei saanud AI hinnangut", file=sys.stderr)
-        sys.exit(1)
+        print("⚠️ Ei saanud AI hinnangut", file=sys.stderr)
+        # Proovime siiski kommenteerida
+        comment = """## 🤖 AI Töömahu Hinnang
+
+⚠️ **AI hinnang ebaõnnestus** - ei saanud hinnangut OpenAI API'st.
+
+Võimalikud põhjused:
+- OpenAI API viga
+- API limiit ületatud
+- Võrguprobleemid
+"""
+        if post_comment_to_pr(comment):
+            print("✅ Kommenteeritud (veateade)")
+        sys.exit(0)
     
     print(f"AI hinnang: {hours} töötundi")
     
     print("Postitan kommentaari PR'i...")
     if post_comment_to_pr(hours):
-        print("✅ Valmis!")
+        print("✅ Valmis! Kommentaar postitatud.")
         sys.exit(0)
     else:
         print("⚠️ Kommentaari postitamine ebaõnnestus", file=sys.stderr)
