@@ -228,8 +228,23 @@ jobs:
         echo "🔍 Kontrollin environment'i olekut..."
         aws elasticbeanstalk describe-environments \
           --environment-names Frontend-env \
-          --query 'Environments[0].[EnvironmentName,Status,Health,VersionLabel]' \
+          --query 'Environments[0].[EnvironmentName,Status,Health,VersionLabel,SolutionStackName,PlatformArn]' \
           --output table
+        
+        echo ""
+        echo "📋 Environment'i konfiguratsioon:"
+        CONFIG=$(aws elasticbeanstalk describe-configuration-settings \
+          --application-name frontend \
+          --environment-name Frontend-env \
+          --query 'ConfigurationSettings[0].OptionSettings[?Namespace==`aws:elasticbeanstalk:container:docker`]' \
+          --output json 2>/dev/null || echo "[]")
+        
+        if [ "$CONFIG" != "[]" ]; then
+          echo "Docker konfiguratsioon leitud"
+          echo "$CONFIG" | head -20
+        else
+          echo "⚠️ Docker konfiguratsioon puudub - võib olla probleem!"
+        fi
         
     - name: Deploy to Elastic Beanstalk
       run: |
@@ -248,38 +263,127 @@ jobs:
       run: |
         echo "⏳ Ootan kuni 10 minutit, kuni deployment lõpeb..."
         
-        # Ootame, kuni deployment on valmis (maksimaalselt 10 min)
-        aws elasticbeanstalk wait environment-updated \
-          --environment-names Frontend-env \
-          --max-attempts 20 \
-          --delay 30 || {
-            echo "⚠️ Wait command timeout või viga"
-            exit 1
-          }
+        MAX_ATTEMPTS=20
+        DELAY=30
+        ATTEMPT=0
         
-        echo "✅ Deployment lõppes!"
+        while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+          STATUS=$(aws elasticbeanstalk describe-environments \
+            --environment-names Frontend-env \
+            --query 'Environments[0].Status' \
+            --output text 2>/dev/null || echo "Unknown")
+          
+          echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS - Status: $STATUS"
+          
+          if [ "$STATUS" = "Ready" ]; then
+            echo "✅ Deployment valmis! Status: $STATUS"
+            exit 0
+          fi
+          
+          if [ "$STATUS" = "Terminated" ] || [ "$STATUS" = "Terminating" ]; then
+            echo "❌ Environment on terminated!"
+            exit 1
+          fi
+          
+          sleep $DELAY
+          ATTEMPT=$((ATTEMPT + 1))
+        done
+        
+        echo "⚠️ Timeout - deployment ei lõppenud 10 minuti jooksul"
+        echo "Kontrollime praegust staatust..."
+        aws elasticbeanstalk describe-environments \
+          --environment-names Frontend-env \
+          --query 'Environments[0].[Status,Health]' \
+          --output table
+        exit 1
         
     - name: Check final deployment status
       if: always()
       run: |
         echo "📊 Lõplik environment'i staatus:"
-        aws elasticbeanstalk describe-environments \
-          --environment-names Frontend-env \
-          --query 'Environments[0].[EnvironmentName,Status,Health,VersionLabel]' \
-          --output table
         
-        # Kontrollime, kas deployment õnnestus
+        # Saame environment'i info
+        STATUS=$(aws elasticbeanstalk describe-environments \
+          --environment-names Frontend-env \
+          --query 'Environments[0].Status' \
+          --output text)
+        
         HEALTH=$(aws elasticbeanstalk describe-environments \
           --environment-names Frontend-env \
           --query 'Environments[0].Health' \
           --output text)
         
-        echo "Environment Health: $HEALTH"
+        VERSION=$(aws elasticbeanstalk describe-environments \
+          --environment-names Frontend-env \
+          --query 'Environments[0].VersionLabel' \
+          --output text)
         
-        if [ "$HEALTH" != "Green" ] && [ "$HEALTH" != "Yellow" ]; then
-          echo "❌ Deployment ebaõnnestus! Health: $HEALTH"
-          exit 1
+        echo "Environment Name: Frontend-env"
+        echo "Status: $STATUS"
+        echo "Health: $HEALTH"
+        echo "Version: $VERSION"
+        echo ""
+        
+        # Näitame tabelina
+        aws elasticbeanstalk describe-environments \
+          --environment-names Frontend-env \
+          --query 'Environments[0].[EnvironmentName,Status,Health,VersionLabel]' \
+          --output table
+        
+        # Kontrollime deployment'i staatust
+        if [ "$STATUS" != "Ready" ]; then
+          echo "⚠️ Environment status pole 'Ready': $STATUS"
+          echo "Võib olla, et deployment on veel pooleli..."
         fi
         
-        echo "✅ Deployment õnnestus! Health: $HEALTH"
+        # Kontrollime health'i
+        if [ "$HEALTH" = "Red" ] || [ "$HEALTH" = "Grey" ]; then
+          echo "❌ Deployment ebaõnnestus! Health: $HEALTH"
+          echo ""
+          echo "Instance health details:"
+          aws elasticbeanstalk describe-instances-health \
+            --environment-name Frontend-env \
+            --attribute-names All \
+            --query 'InstanceHealthList[*].[InstanceId,HealthStatus,Color]' \
+            --output table
+          exit 1
+        elif [ "$HEALTH" = "Yellow" ]; then
+          echo "⚠️ Deployment õnnestus, aga on hoiatus! Health: $HEALTH"
+          echo ""
+          echo "Instance health details:"
+          aws elasticbeanstalk describe-instances-health \
+            --environment-name Frontend-env \
+            --attribute-names All \
+            --query 'InstanceHealthList[*].[InstanceId,HealthStatus,Color]' \
+            --output table
+          echo ""
+          echo "✅ Deployment õnnestus, aga kontrolli AWS Console'is hoiatusi!"
+        else
+          echo "✅ Deployment õnnestus täielikult! Health: $HEALTH"
+        fi
+        
+        echo ""
+        echo "📋 Viimased logid (viimased 50 rida):"
+        echo "=========================================="
+        
+        # Proovime saada logid
+        LOG_TAIL=$(aws elasticbeanstalk request-environment-info \
+          --environment-name Frontend-env \
+          --info-type tail 2>&1 || echo "Logide pärimine ebaõnnestus")
+        
+        # Ootame veidi, et logid oleksid valmis
+        sleep 5
+        
+        # Proovime saada tail logid
+        aws elasticbeanstalk retrieve-environment-info \
+          --environment-name Frontend-env \
+          --info-type tail 2>&1 | head -100 || echo "Ei saanud logisid"
+        
+        echo ""
+        echo "🔍 Kontrollime events:"
+        aws elasticbeanstalk describe-events \
+          --environment-name Frontend-env \
+          --max-items 10 \
+          --query 'Events[*].[EventDate,Severity,Message]' \
+          --output table
 
