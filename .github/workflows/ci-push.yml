@@ -1,4 +1,4 @@
-name: CI - Push (Test & Deploy)
+name: CI - Push
 
 on:
   push:
@@ -192,8 +192,52 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
       
+    - name: Prepare docker-compose.yml for AWS
+      env:
+        DOCKER_ID: ${{ secrets.DOCKER_ID }}
+      run: |
+        # Loome Elastic Beanstalk'i jaoks sobiva docker-compose.yml faili
+        cat > docker-compose.yml << EOF
+        version: '3'
+        services:
+          postgres:
+            image: 'postgres:latest'
+            environment:
+              - POSTGRES_PASSWORD=postgres_password
+          redis:
+            image: 'redis:latest'
+          nginx:
+            depends_on:
+              - api
+              - client
+            restart: always
+            image: '${DOCKER_ID}/multi-nginx:latest'
+            ports:
+              - '80:80'
+          api:
+            image: '${DOCKER_ID}/multi-server:latest'
+            environment:
+              - REDIS_HOST=redis
+              - REDIS_PORT=6379
+              - PGUSER=postgres
+              - PGHOST=postgres
+              - PGDATABASE=postgres
+              - PGPASSWORD=postgres_password
+              - PGPORT=5432
+          client:
+            image: '${DOCKER_ID}/multi-client:latest'
+            environment:
+              - WDS_SOCKET_PORT=0
+          worker:
+            image: '${DOCKER_ID}/multi-worker:latest'
+            environment:
+              - REDIS_HOST=redis
+              - REDIS_PORT=6379
+        EOF
+        echo "✅ docker-compose.yml fail loodud Elastic Beanstalk'i jaoks"
+        
     - name: Generate deployment package
-      run: zip -r deploy.zip . -x '*.git*'
+      run: zip -r deploy.zip . -x '*.git*' 'docker-compose.aws.yml'
       
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
