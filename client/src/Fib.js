@@ -62,7 +62,7 @@ const Fib = () => {
       <h3>Indexes I have seen:</h3>
       {renderSeenIndexes()}
 
-      <h3>Calculated Values:</h3>
+      <h3>Arvutatud väärtused:</h3>
       {renderValues()}
     </div>
   );

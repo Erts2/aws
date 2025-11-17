@@ -207,3 +207,26 @@ jobs:
       run: |
         python3 .github/scripts/estimate_work_hours.py
 
+  deploy-to-aws:
+    name: Deploy to AWS
+    needs: [github-super-linter, sonarcloud]  
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Generate deployment package
+      run: zip -r deploy.zip . -x '*.git*'
+      
+    - name: Deploy to AWS
+      uses: einaregilsson/beanstalk-deploy@v22
+      with:
+        aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+        aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
+        application_name: frontend
+        environment_name: Frontend-env
+        version_label: ${{ github.sha }}
+        region: eu-north-1
+        deployment_package: deploy.zip
+
