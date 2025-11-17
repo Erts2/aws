@@ -1,4 +1,4 @@
-name: CI - Merge Request (Test Only)
+name: CI - Push Request (Test Only)
 
 on:
   pull_request:
