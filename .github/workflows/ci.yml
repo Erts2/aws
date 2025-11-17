@@ -214,19 +214,32 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
       
     - name: Generate deployment package
       run: zip -r deploy.zip . -x '*.git*'
       
-    - name: Deploy to AWS
-      uses: einaregilsson/beanstalk-deploy@5be1bd3742735f267bdcf493c4a0ac010c7ea2ee # v22
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
       with:
-        aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
-        aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
-        application_name: frontend
-        environment_name: Frontend-env
-        version_label: ${{ github.sha }}
-        region: eu-north-1
-        deployment_package: deploy.zip
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+        aws-region: eu-north-1
+        
+    - name: Upload to S3
+      run: |
+        aws s3 cp deploy.zip s3://elasticbeanstalk-eu-north-1-086585122910/frontend/deploy-${{ github.sha }}.zip
+        
+    - name: Create application version
+      run: |
+        aws elasticbeanstalk create-application-version \
+          --application-name frontend \
+          --version-label ${{ github.sha }} \
+          --source-bundle S3Bucket="elasticbeanstalk-eu-north-1-086585122910",S3Key="frontend/deploy-${{ github.sha }}.zip"
+        
+    - name: Deploy to Elastic Beanstalk
+      run: |
+        aws elasticbeanstalk update-environment \
+          --environment-name Frontend-env \
+          --version-label ${{ github.sha }}
 
