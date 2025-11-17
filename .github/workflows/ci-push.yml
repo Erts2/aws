@@ -204,18 +204,25 @@ jobs:
             image: 'postgres:latest'
             environment:
               - POSTGRES_PASSWORD=postgres_password
+            healthcheck:
+              test: ["CMD-SHELL", "pg_isready -U postgres"]
+              interval: 10s
+              timeout: 5s
+              retries: 5
           redis:
             image: 'redis:latest'
-          nginx:
-            depends_on:
-              - api
-              - client
-            restart: always
-            image: '${DOCKER_ID}/multi-nginx:latest'
-            ports:
-              - '80:80'
+            healthcheck:
+              test: ["CMD", "redis-cli", "ping"]
+              interval: 10s
+              timeout: 5s
+              retries: 5
           api:
             image: '${DOCKER_ID}/multi-server:latest'
+            depends_on:
+              postgres:
+                condition: service_healthy
+              redis:
+                condition: service_healthy
             environment:
               - REDIS_HOST=redis
               - REDIS_PORT=6379
@@ -224,17 +231,58 @@ jobs:
               - PGDATABASE=postgres
               - PGPASSWORD=postgres_password
               - PGPORT=5432
+            healthcheck:
+              test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+              interval: 30s
+              timeout: 10s
+              retries: 3
+              start_period: 40s
           client:
             image: '${DOCKER_ID}/multi-client:latest'
+            depends_on:
+              - api
             environment:
               - WDS_SOCKET_PORT=0
+            healthcheck:
+              test: ["CMD", "curl", "-f", "http://localhost:3000"]
+              interval: 30s
+              timeout: 10s
+              retries: 3
+              start_period: 40s
           worker:
             image: '${DOCKER_ID}/multi-worker:latest'
+            depends_on:
+              redis:
+                condition: service_healthy
             environment:
               - REDIS_HOST=redis
               - REDIS_PORT=6379
+            healthcheck:
+              test: ["CMD", "ps", "aux", "|", "grep", "node"]
+              interval: 30s
+              timeout: 10s
+              retries: 3
+              start_period: 20s
+          nginx:
+            image: '${DOCKER_ID}/multi-nginx:latest'
+            depends_on:
+              api:
+                condition: service_healthy
+              client:
+                condition: service_healthy
+            restart: always
+            ports:
+              - '80:80'
+            healthcheck:
+              test: ["CMD", "curl", "-f", "http://localhost:80"]
+              interval: 30s
+              timeout: 10s
+              retries: 3
+              start_period: 40s
         EOF
         echo "✅ docker-compose.yml fail loodud Elastic Beanstalk'i jaoks"
+        echo "📋 Faili sisu:"
+        cat docker-compose.yml
         
     - name: Generate deployment package
       run: zip -r deploy.zip . -x '*.git*' 'docker-compose.aws.yml'
